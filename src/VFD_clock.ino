@@ -2,17 +2,11 @@
 #include <FS.h>
 #include <time.h>                      
 #include <sys/time.h>                  
-#include <ESP8266WiFi.h>
-#include <DNSServer.h>
-#include <ESP8266WebServer.h>
-#include <ArduinoJson.h>
-#include <WiFiManager.h>        //https://github.com/tzapu/WiFiManager
 #include <Ticker.h>  
 
 #define TEST_SEGMENTS_ORDER 0
 
-Ticker NTPSync, timeTicker, adcTicker;
-WiFiEventHandler connectedHandler, disconnectedHandler, gotIPHandler;
+Ticker vfdRefresh, timeTicker, adcTicker;
 
 #define UTC_START  1563321600   // (UTC) 17/07/2019 00:00:00
 #define STR_LENGHT 20
@@ -21,9 +15,7 @@ WiFiEventHandler connectedHandler, disconnectedHandler, gotIPHandler;
 #include "vfd_max6921.h"
 
 char display_buf[STR_LENGHT];
-bool shouldSaveConfig = false;
-bool startCaptive = false;
-uint16_t dimValue;                          // PWM value related to ambient light
+uint16_t dimValue = 50;                           // PWM value related to ambient light
 uint32_t vfd_refresh_time;
 bool risingEdge = false;
 bool showDay = false ;
@@ -36,8 +28,10 @@ struct tm lt;
 String timeZone = "CET-1CEST,M3.5.0,M10.5.0/3";     // https://github.com/nayarsystems/posix_tz_db/blob/master/zones.json 
 bool dimLight = true;                               // Auto-adjust brightness 
 bool dayView = true;                                // Show day and month
-uint16_t brightness = 75;                           // Target value
-#include "captive.h"
+int16_t lightOffset = -50;                           // Offset value
+
+// #include "captive.h"
+#include "webserver.h"
 
 void setup(){        
   time_t rtc = UTC_START;
@@ -55,23 +49,25 @@ void setup(){
   digitalWrite(BLANK, LOW);
   analogWriteFreq(5000);
   
-  pinMode(START_AP, INPUT_PULLUP);
   Serial.begin(115200);
   Serial.println();  
+
+  setupWebserver();
+  // configTime(3600, 3600, "time.google.com", "time.windows.com", "pool.ntp.org");
+  configTime(timeZone.c_str(), "time.google.com", "time.windows.com", "pool.ntp.org");
 
   //Initialize the hardware SPI
   SPI.pins(CLK, D6, DATA, LOAD);
   SPI.begin();         
   SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
-
-  // Read config file if exist.
-  readConfig();
   
-  // Start WiFi connection in "station mode"
-  connectedHandler = WiFi.onStationModeConnected(&onConnected);
-  gotIPHandler = WiFi.onStationModeGotIP(&onGotIP);  
-
-  startTickers();   
+  // This ticker will update local time every 1000ms  
+  timeTicker.attach_ms(1000, dateTimeUpdate); 
+  
+  // This ticker will update the VFD every 1ms
+  vfdRefresh.attach_ms(1, vfd_refresh); 
+  // This ticker will update the ambient light every 5s
+  adcTicker.attach(5, readLight);
 
 #if TEST_SEGMENTS_ORDER
   // Test segments order and digit to segment mapping 
@@ -81,21 +77,22 @@ void setup(){
 
 
 
-
-
 void loop() {    
-  // Check for manual start of captive portal
-  if(digitalRead(START_AP) == LOW) {
-    delay(200) ;    // small delay for debounce button
-    startCaptive = true;    
+  if (runApPortal || millis() - portalStartTime < PORTAL_TIMEOUT ) {
+    myWebServer.run();
+    if (runApPortal && millis() - portalStartTime > PORTAL_TIMEOUT) {
+      runApPortal = false;
+      myWebServer.stop();
+      WiFi.mode(WIFI_STA);
+      Serial.println(F("Captive portal timeout\nSwitching to STA mode"));
+    }
   }
-  if (startCaptive)  captivePortal();  
-  if (shouldSaveConfig)  saveConfig();
 
-  // Refresh VFD
-  if(micros() - vfd_refresh_time > 500){
-     vfd_refresh_time = micros();
-     vfd_refresh();
+  static uint32_t reconnecTime = millis();
+  if (!runApPortal && WiFi.status() == WL_DISCONNECTED && millis() - reconnecTime > 10000) {
+    Serial.println(F("WiFi disconnected. Reconnecting..."));
+    reconnecTime = millis();
+    WiFi.begin();
   }
 
   // If enabled, show day and month at the beginning of every minutes
@@ -122,7 +119,6 @@ void loop() {
     showDay = false;
     risingEdge = false;
     // Show time hh.mm.ss
-    //sprintf(display_buf, "%02d.%02d.%02d", 23, 35, 56);  // 23.35.56 only for test
     snprintf(display_buf, sizeof(display_buf), "%02d.%02d.%02d", Hour, Min, Sec);
     vfd_set_string(display_buf, 0); 
    }
@@ -145,46 +141,31 @@ void readLight(){
   Serial.printf("\nAmbient light: %ld (%d)", ambientLight, sample_index);
   
   // Set brightness or LCD light always ON in not enabled
-  dimValue = map(ambientLight, 300, 1000, 1023, 0) -  brightness;
-  dimValue = constrain(dimValue, 50, 1023);
+  dimValue = map(ambientLight, 30, 1023, 200, 0) + lightOffset;
 
-  Serial.printf("\nDimming value (+ %d offset): %d", brightness, dimValue);
-  
+  // 0 Max brightness (0) to 500 Min brightness 
+  dimValue = constrain(dimValue, 0, 200);
 
   // TEST
-  dimLight = false;
-  //dimValue = 512;
+  // dimLight = false;
+  // dimValue = 200;
+  // analogWrite(BLANK, dimValue);
 
-  dimLight ? analogWrite(BLANK, 1023 - dimValue) : digitalWrite(BLANK, LOW);  
+  Serial.printf("\nDimming value (+ %d offset): %d", lightOffset, dimValue);
+  dimLight ? analogWrite(BLANK, dimValue) : digitalWrite(BLANK, LOW);  
 }
 
 
 void dateTimeUpdate(){
   now = time(nullptr);      
   lt = *localtime(&now);
-  char buf[30];
-  strftime(buf, sizeof(buf), " %d/%m/%Y - %H:%M:%S", &lt);     
+  // char buf[30];
+  // strftime(buf, sizeof(buf), " %d/%m/%Y - %H:%M:%S", &lt);    
+  // Serial.printf("\nLocal time: %s", buf); 
   Year = lt.tm_year;  
   Month = lt.tm_mon;
   Day = lt.tm_mday;
   Hour = lt.tm_hour;
   Min = lt.tm_min;
   Sec = lt.tm_sec;     
-}
-
-
-void startTickers() {         
-  // This ticker will update local time every 1000ms
-  timeTicker.attach_ms(1000, dateTimeUpdate );
-
-  // This ticker will sync local time with NTP once a day
-  NTPSync.attach(86400L, []() {
-    // TEST with NetTime http://www.timesynctool.com/ 
-    //configTime(0, 0, "192.168.43.11", "192.168.43.11", "192.168.43.11"); 
-    configTime(0, 0, "pool.ntp.org", "time.google.com", "time.windows.com");   
-    Month = lt.tm_mon;
-    Year = lt.tm_year;
-  });
-
-  adcTicker.attach(5, readLight);
 }
