@@ -9,6 +9,8 @@
 #include <WiFiManager.h>        //https://github.com/tzapu/WiFiManager
 #include <Ticker.h>  
 
+#define TEST_SEGMENTS_ORDER 0
+
 Ticker NTPSync, timeTicker, adcTicker;
 WiFiEventHandler connectedHandler, disconnectedHandler, gotIPHandler;
 
@@ -16,22 +18,6 @@ WiFiEventHandler connectedHandler, disconnectedHandler, gotIPHandler;
 #define STR_LENGHT 20
 #define ADC_NUM_SAMPLES 30
 
-#define  BLANK    D0
-#define  LOAD     D8
-#define  CLK      D5
-#define  DATA     D7
-#define  START_AP D3
-
-/*
- * IV-18 segments and digits pins are connected to the relative seg_max6921_out[] and digit_max6921_out[]
- * with "custom" order for more clean PCB layout (also useful for connection without PCB or with a 28TSSOP adapter)
- * We can connect VFD pins to any OUT of MAX6921 and easily adjust in the software.
- */                      
-enum iv18vfd_segments           {  A,  B,  C,  D,  E,  F,  G,  H};
-const byte seg_max6921_out[8] = { 11, 13, 16, 17, 15, 12, 14, 18 };
- 
-// VFD digits                     { 1, 2, 3, 4, 5, 6, 7, 8, 9};
-const byte digit_max6921_out[9] = { 7, 0, 6, 1, 5, 2, 3, 4, 8}; 
 #include "vfd_max6921.h"
 
 char display_buf[STR_LENGHT];
@@ -86,7 +72,11 @@ void setup(){
   gotIPHandler = WiFi.onStationModeGotIP(&onGotIP);  
 
   startTickers();   
-  //test_segments_order();
+
+#if TEST_SEGMENTS_ORDER
+  // Test segments order and digit to segment mapping 
+  test_segments_order();
+#endif
 }
 
 
@@ -111,7 +101,7 @@ void loop() {
   // If enabled, show day and month at the beginning of every minutes
   if(Sec > 0 && Sec < 5  && dayView){                   
      showDay = true;
-     sprintf(display_buf, "%02d %s %04d\0", Day, month_abbrevs[Month], 1900+Year);
+     snprintf(display_buf, sizeof(display_buf), "%02d %s %04d", Day, month_abbrevs[Month], 1900+Year);
 
      // Reset index and calculate string length
      if(!risingEdge){
@@ -147,12 +137,12 @@ void readLight(){
   
   // Add a new sample
   lightSamples[sample_index] = analogRead(A0);
-  sample_index = (++sample_index) % ADC_NUM_SAMPLES;
+  sample_index = (sample_index + 1) % ADC_NUM_SAMPLES;
   for(count=0; count<ADC_NUM_SAMPLES; count++)
     ambientLight += lightSamples[count];
   ambientLight /= count;  
   ambientLight = analogRead(A0);
-  Serial.printf("\nAmbient light: %d (%d)", ambientLight, sample_index);
+  Serial.printf("\nAmbient light: %ld (%d)", ambientLight, sample_index);
   
   // Set brightness or LCD light always ON in not enabled
   dimValue = map(ambientLight, 300, 1000, 1023, 0) -  brightness;

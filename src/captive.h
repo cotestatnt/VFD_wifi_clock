@@ -1,3 +1,16 @@
+#include <FS.h>
+#include <LittleFS.h>
+#include <ArduinoJson.h>
+#include <WiFiManager.h>        //https://github.com/tzapu/WiFiManager
+extern bool shouldSaveConfig;
+extern bool startCaptive;
+extern String timeZone;
+extern bool dimLight;
+extern uint16_t brightness;
+extern struct tm lt;
+extern WiFiEventHandler connectedHandler, disconnectedHandler;
+extern time_t now;
+
 void saveConfigCallback() {
   Serial.println("Configurazione salvata.");
   shouldSaveConfig = true;
@@ -26,7 +39,6 @@ void captivePortal() {
 
   WiFiManagerParameter showDateLabel("<br>Mostra data e mese");
   WiFiManagerParameter showDateValue("showdate", "Mostra giorno e mese", "1", 50);
-  
 
   wifiManager.addParameter(&tzLabel);
   wifiManager.addParameter(&tzLink);
@@ -74,11 +86,11 @@ void captivePortal() {
 //Read the custom parameters from FS  
 void readConfig() {
   Serial.print("\nMounting FS...");
-  if (SPIFFS.begin()) {
+  if (LittleFS.begin()) {
     Serial.println(" done");
-    if (SPIFFS.exists("/config.json")) {
+    if (LittleFS.exists("/config.json")) {
       Serial.print("Reading config file..");
-      File configFile = SPIFFS.open("/config.json", "r");
+      File configFile = LittleFS.open("/config.json", "r");
       if (configFile) {
         size_t size = configFile.size();
         std::unique_ptr<char[]> buf(new char[size]);   // Allocate a buffer to store contents of the file.
@@ -112,7 +124,7 @@ void saveConfig(){
   doc["dimLight"] = dimLight;
   doc["brightness"] = brightness;
     
-  File configFile = SPIFFS.open("/config.json", "w");
+  File configFile = LittleFS.open("/config.json", "w");
   if (!configFile) { Serial.println("failed to open config file for writing"); }
   serializeJson(doc, configFile);
   serializeJson(doc, Serial);

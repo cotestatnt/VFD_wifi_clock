@@ -1,3 +1,24 @@
+#include <Arduino.h>
+#include <SPI.h>
+
+#define  BLANK    D0
+#define  LOAD     D8
+#define  CLK      D5
+#define  DATA     D7
+#define  START_AP D3
+
+/*
+ * IV-18 segments and digits pins are connected to the relative seg_max6921_out[] and digit_max6921_out[]
+ * with "custom" order for more clean PCB layout (also useful for connection without PCB or with a 28TSSOP adapter)
+ * We can connect VFD pins to any OUT of MAX6921 and easily adjust in the software.
+ */                      
+enum iv18vfd_segments           {  A,  B,  C,  D,  E,  F,  G,  H};
+const byte seg_max6921_out[8] = { 11, 13, 16, 17, 15, 12, 14, 18 };
+ 
+// VFD digits                     { 1, 2, 3, 4, 5, 6, 7, 8, 9};
+const byte digit_max6921_out[9] = { 7, 0, 6, 1, 5, 2, 3, 4, 8}; 
+
+
 #define BYTE_TO_BINARY_PATTERN " %c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte) (byte & 0x80?'1':'0'), (byte & 0x40?'1':'0'), (byte & 0x20?'1':'0'), (byte & 0x10?'1':'0'), (byte & 0x08?'1':'0'), (byte & 0x04?'1':'0'), (byte & 0x02?'1':'0'), (byte & 0x01?'1':'0') 
 bool debug_digit = false;
@@ -41,50 +62,49 @@ const byte SEG_F = segmentToBit(F);
 const byte SEG_G = segmentToBit(G);
 const byte SEG_H = segmentToBit(H);
 
-#pragma warning( push, 0)
 
 const byte vfd_font[] = {
   /* 0 - 9 */
-  SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F,
-  SEG_B | SEG_C,
-  SEG_A | SEG_B | SEG_D | SEG_E | SEG_G,
-  SEG_A | SEG_B | SEG_C | SEG_D | SEG_G,
-  SEG_B | SEG_C | SEG_F | SEG_G,
-  SEG_A | SEG_C | SEG_D | SEG_F | SEG_G,
-  SEG_A | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G,
-  SEG_A | SEG_B | SEG_C,
-  SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G,
-  SEG_A | SEG_B | SEG_C | SEG_F | SEG_G,
-  
+  static_cast<byte>(SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F),
+  static_cast<byte>(SEG_B | SEG_C),
+  static_cast<byte>(SEG_A | SEG_B | SEG_D | SEG_E | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_C | SEG_D | SEG_G),
+  static_cast<byte>(SEG_B | SEG_C | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_C | SEG_D | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_C),
+  static_cast<byte>(SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_C | SEG_F | SEG_G),
+
   /* a - z */
-  SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_G, //a
-  SEG_C | SEG_D | SEG_E | SEG_F | SEG_G,    
-  SEG_D | SEG_E | SEG_G,
-  SEG_B | SEG_C | SEG_D | SEG_E | SEG_G,
-  SEG_A | SEG_B | SEG_D | SEG_E | SEG_F | SEG_G,
-  SEG_A | SEG_E | SEG_F | SEG_G,
-  SEG_A | SEG_B | SEG_C | SEG_D | SEG_F | SEG_G,
-  SEG_C | SEG_E | SEG_F | SEG_G,
-  SEG_B | SEG_C,
-  SEG_B | SEG_C | SEG_D | SEG_E,
-  SEG_C | SEG_E | SEG_F | SEG_G,
-  SEG_D | SEG_E | SEG_F,
-  SEG_C | SEG_E | SEG_G | SEG_H , // m
-  SEG_C | SEG_E | SEG_G,          // n
-  SEG_C | SEG_D | SEG_E | SEG_G,
-  SEG_A | SEG_B | SEG_E | SEG_F | SEG_G,
-  SEG_A | SEG_B | SEG_C | SEG_D | SEG_G | SEG_H,
-  SEG_E | SEG_G,
-  SEG_A | SEG_C | SEG_D | SEG_F | SEG_G,
-  SEG_D | SEG_E | SEG_F | SEG_G,
-  SEG_C | SEG_D | SEG_E,
-  SEG_C | SEG_D | SEG_E,
-  SEG_A | SEG_C | SEG_D | SEG_E,
-  SEG_B | SEG_C | SEG_E | SEG_F | SEG_G,
-  SEG_B | SEG_C | SEG_D | SEG_F | SEG_G,
-  SEG_A | SEG_B | SEG_D | SEG_E | SEG_G,
+  static_cast<byte>(SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_G), //a
+  static_cast<byte>(SEG_C | SEG_D | SEG_E | SEG_F | SEG_G),    
+  static_cast<byte>(SEG_D | SEG_E | SEG_G),
+  static_cast<byte>(SEG_B | SEG_C | SEG_D | SEG_E | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_D | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_C | SEG_D | SEG_F | SEG_G),
+  static_cast<byte>(SEG_C | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_B | SEG_C),
+  static_cast<byte>(SEG_B | SEG_C | SEG_D | SEG_E),
+  static_cast<byte>(SEG_C | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_D | SEG_E | SEG_F),
+  static_cast<byte>(SEG_C | SEG_E | SEG_G | SEG_H), // m
+  static_cast<byte>(SEG_C | SEG_E | SEG_G),         // n
+  static_cast<byte>(SEG_C | SEG_D | SEG_E | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_C | SEG_D | SEG_G | SEG_H),
+  static_cast<byte>(SEG_E | SEG_G),
+  static_cast<byte>(SEG_A | SEG_C | SEG_D | SEG_F | SEG_G),
+  static_cast<byte>(SEG_D | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_C | SEG_D | SEG_E),
+  static_cast<byte>(SEG_C | SEG_D | SEG_E),
+  static_cast<byte>(SEG_A | SEG_C | SEG_D | SEG_E),
+  static_cast<byte>(SEG_B | SEG_C | SEG_E | SEG_F | SEG_G),
+  static_cast<byte>(SEG_B | SEG_C | SEG_D | SEG_F | SEG_G),
+  static_cast<byte>(SEG_A | SEG_B | SEG_D | SEG_E | SEG_G),
 };
-#pragma warning( pop ) 
+
 
 // Store characters to display
 byte vfd_data[9];
@@ -120,7 +140,7 @@ void vfd_refresh() {
 
   
   // Next digit on next call
-  vfd_digit = (++vfd_digit) % 9;  
+  vfd_digit = (vfd_digit + 1) % 9;  
   digitalWrite(LOAD, LOW);   
 }
 
@@ -178,35 +198,34 @@ void vfd_scroll_string(char *str, uint32_t scrollTime) {
   if((dayIndex + 9) >  dayStrlen)
     return;
   if(millis() - _time > scrollTime) {
-    dayIndex = (++dayIndex) % dayStrlen;
+    dayIndex = (dayIndex + 1) % dayStrlen;
     vfd_set_string(str, dayIndex);
     _time = millis();    
   }
 }
 
-#pragma warning( push )
-#pragma warning( disable : 4101)
+#if TEST_SEGMENTS_ORDER
 void test_segments_order(){  
   Serial.println();
-  Serial.printf("\nA: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_A));
-  Serial.printf("\nB: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_B));
-  Serial.printf("\nC: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_C));
-  Serial.printf("\nD: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_D));
-  Serial.printf("\nE: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_E));
-  Serial.printf("\nF: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_F));
-  Serial.printf("\nG: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_G));
-  Serial.printf("\nH: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_H));
+  Serial.printf("\nA: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_A));
+  Serial.printf("\nB: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_B));
+  Serial.printf("\nC: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_C));
+  Serial.printf("\nD: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_D));
+  Serial.printf("\nE: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_E));
+  Serial.printf("\nF: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_F));
+  Serial.printf("\nG: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_G));
+  Serial.printf("\nH: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(SEG_H));
 
   byte testChar;
   testChar = vfd_map_char('2');
-  Serial.printf("\nTest char 2: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar));  
+  Serial.printf("\nTest char 2: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar));  
   testChar = vfd_map_char('3');
-  Serial.printf("\nTest char 3: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar)); 
+  Serial.printf("\nTest char 3: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar)); 
   testChar = vfd_map_char('5');
-  Serial.printf("\nTest char 5: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar));
+  Serial.printf("\nTest char 5: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar));
   testChar = vfd_map_char('6');
-  Serial.printf("\nTest char 6: "BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar));
+  Serial.printf("\nTest char 6: " BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(testChar));
   Serial.println();
   debug_digit = true;
 }
-#pragma warning( pop ) 
+#endif // TEST_SEGMENTS_ORDER
